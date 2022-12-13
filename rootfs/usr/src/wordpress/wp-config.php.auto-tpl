@@ -1,0 +1,47 @@
+<?php
+
+if (!function_exists('getenv_docker')) {
+    function getenv_docker($env, $default)
+    {
+        if (($val = getenv($env)) !== false) {
+            return $val;
+        } else {
+            return $default;
+        }
+    }
+}
+
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strpos($_SERVER['HTTP_X_FORWARDED_PROTO'], 'https') !== false) {
+    $_SERVER['HTTPS'] = 'on';
+}
+
+$table_prefix = 'wp_';
+define('DB_NAME', '$WP_DB_NAME');
+define('DB_USER', '$WP_DB_USER');
+define('DB_PASSWORD', '$WP_DB_PASSWORD');
+define('DB_HOST', '$WP_DB_HOST');
+define('DB_CHARSET', 'utf8');
+define('DB_COLLATE', '');
+
+define('AUTH_KEY', '$WP_RAND');
+define('SECURE_AUTH_KEY', '$WP_RAND');
+define('LOGGED_IN_KEY', '$WP_RAND');
+define('NONCE_KEY', '$WP_RAND');
+define('AUTH_SALT', '$WP_RAND');
+define('SECURE_AUTH_SALT', '$WP_RAND');
+define('LOGGED_IN_SALT', '$WP_RAND');
+define('NONCE_SALT', '$WP_RAND');
+
+define('WP_DEBUG', $WP_DEBUG);
+
+define('RT_WP_NGINX_HELPER_CACHE_PATH','$WP_NGINX_CACHE');
+
+if ($configExtra = getenv_docker('WORDPRESS_CONFIG_EXTRA', '')) {
+    eval($configExtra);
+}
+
+if (!defined('ABSPATH')) {
+    define('ABSPATH', __DIR__.'/');
+}
+
+require_once ABSPATH.'wp-settings.php';
