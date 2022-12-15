@@ -1,35 +1,49 @@
 version: "3.8"
 
 services:
-    
-    app_prod:
-        image: marcortola/php-fpm-nginx-wordpress:7.4
-        restart: on-failure
-        ports:
-            - '10000:80'
-        volumes:
-            - wp_content:/var/www/wp-content
-        environment:
-            - WP_DB_NAME=secret
-            - WP_DB_USER=secret
-            - WP_DB_PASSWORD=secret
-            - WP_DB_HOST=localhost
-
-    app_dev:
-        image: marcortola/php-fpm-nginx-wordpress:7.4-debug
-        restart: on-failure
-        ports:
-            - '10001:80'
-        volumes:
-            - wp_content:/var/www/wp-content
-        environment:
-            - XDEBUG_MODE=${XDEBUG_MODE:-debug}
-            - WP_DB_NAME=secret
-            - WP_DB_USER=secret
-            - WP_DB_PASSWORD=secret
-            - WP_DB_HOST=localhost
-        extra_hosts:
-            - host.docker.internal:host-gateway
+  
+  app:
+    image: marcortola/php-fpm-nginx-wordpress:7.4
+    restart: on-failure
+    ports:
+      - '10000:80'
+    volumes:
+      - wp_content:/var/www/wp-content
+    environment:
+      - WP_DB_NAME=secret
+      - WP_DB_USER=secret
+      - WP_DB_PASSWORD=secret
+      - WP_DB_HOST=localhost
+  
+  app_subdir:
+    image: marcortola/php-fpm-nginx-wordpress:7.4
+    working_dir: /var/www/subdir
+    restart: on-failure
+    ports:
+      - '10001:80'
+    volumes:
+      - wp_content:/var/www/subdir/wp-content
+    environment:
+      - WP_DB_NAME=secret
+      - WP_DB_USER=secret
+      - WP_DB_PASSWORD=secret
+      - WP_DB_HOST=localhost
+            
+  app_dev:
+    image: marcortola/php-fpm-nginx-wordpress:7.4-debug
+    restart: on-failure
+    ports:
+      - '10002:80'
+    volumes:
+      - wp_content:/var/www/wp-content
+    environment:
+      - XDEBUG_MODE=${XDEBUG_MODE:-debug}
+      - WP_DB_NAME=secret
+      - WP_DB_USER=secret
+      - WP_DB_PASSWORD=secret
+      - WP_DB_HOST=localhost
+    extra_hosts:
+      - host.docker.internal:host-gateway
 
 volumes:
-    wp_content:
+  wp_content:

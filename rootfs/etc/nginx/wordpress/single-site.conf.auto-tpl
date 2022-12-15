@@ -1,0 +1,19 @@
+root /var/www;
+
+index index.php;
+
+include wordpress/cache-skip.conf;
+include wordpress/security.conf;
+
+location / {
+    try_files $uri $uri/ /index.php?$args;
+}
+
+location ~ \.php(/|$) {
+	include wordpress/fastcgi.conf;
+	include wordpress/cache.conf;
+}
+
+location ~ \.php$ {
+    return 404;
+}
