@@ -17,7 +17,7 @@ jobs:
       matrix:
         target: [ base, debug ]
         php: [ 7.4, 8.1 ]
-        wordpress: [ 6.1 ]
+        wordpress: [ 6.1, 6.1 ]
 
     steps:
       - name: Checkout
