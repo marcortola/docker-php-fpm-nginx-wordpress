@@ -120,6 +120,173 @@ jobs:
         # No database in CI: this page renders only once the WordPress bootstrap has run.
         run: curl -s http://localhost:10000 | grep -q 'Error establishing a database connection'
 
+      # Root mode installs WordPress owned by www-data, with the rendered wp-config.php as
+      # before: mode 644, not group-writable.
+      - name: Test root mode ownership
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          for path in wp-config.php index.php wp-content; do
+            stat="$(docker exec test stat -c '%U:%G' "/var/www/$path")"
+            [ "$stat" = www-data:www-data ] || { echo "/var/www/$path belongs to $stat"; exit 1; }
+          done
+          mode="$(docker exec test stat -c '%a' /var/www/wp-config.php)"
+          [ "$mode" = 644 ] || { echo "wp-config.php has mode $mode"; exit 1; }
+          [ "$(docker exec test ls /etc/nginx/server-default)" = single-site.conf ]
+
+      # A working directory that holds a wp-config.php but no WordPress gets WordPress installed
+      # around it: the render is skipped and the file is kept.
+      - name: Test root mode keeps an existing wp-config.php
+        if: steps.changes.outputs.run == 'true'
+        timeout-minutes: 2
+        run: |
+          trap 'status=$?; [ "$status" -eq 0 ] || docker logs test-root-config; docker rm -f test-root-config > /dev/null; docker volume rm test-root-config-www > /dev/null; exit "$status"' EXIT
+          docker volume create test-root-config-www > /dev/null
+          docker run --rm -v test-root-config-www:/var/www --entrypoint sh php-fpm-nginx-wordpress:ci \
+            -c "printf '<?php\n// kept\n' > /var/www/wp-config.php"
+          docker run -d \
+            --name test-root-config \
+            -v test-root-config-www:/var/www \
+            --health-cmd "/usr/local/bin/healthcheck.sh" \
+            --health-interval=30s \
+            --health-timeout=30s \
+            --health-start-period=60s \
+            --health-start-interval=1s \
+            php-fpm-nginx-wordpress:ci
+          while status="$(docker inspect -f '{{ .State.Health.Status }}' test-root-config)"; do
+            case $status in
+              starting) sleep 1;;
+              healthy) break;;
+              *) echo "container is $status"; exit 1;;
+            esac
+          done
+          [ "$status" = healthy ]
+          docker exec test-root-config test -e /var/www/wp-includes/version.php || { echo 'WordPress is not installed'; exit 1; }
+          config="$(docker exec test-root-config cat /var/www/wp-config.php)"
+          [ "$config" = "$(printf '<?php\n// kept')" ] || { echo "wp-config.php was replaced: $config"; exit 1; }
+
+      # Non-root mode, as consumers run their dev containers: an arbitrary uid with group 0 added
+      # (see README.md). A new named volume at /var/www copies the image's /var/www, which group 0
+      # can write, and the image's wp-content, which belongs to www-data.
+      - name: Test non-root mode with a named volume
+        if: steps.changes.outputs.run == 'true'
+        timeout-minutes: 2
+        run: |
+          trap 'status=$?; [ "$status" -eq 0 ] || docker logs test-nonroot-volume; docker rm -f test-nonroot-volume > /dev/null; docker volume rm test-nonroot-www > /dev/null; exit "$status"' EXIT
+          docker volume create test-nonroot-www > /dev/null
+          docker run -d \
+            --name test-nonroot-volume \
+            --user 1000:1000 \
+            --group-add 0 \
+            -p 10001:80 \
+            -v test-nonroot-www:/var/www \
+            --health-cmd "/usr/local/bin/healthcheck.sh" \
+            --health-interval=30s \
+            --health-timeout=30s \
+            --health-start-period=60s \
+            --health-start-interval=1s \
+            php-fpm-nginx-wordpress:ci
+          while status="$(docker inspect -f '{{ .State.Health.Status }}' test-nonroot-volume)"; do
+            case $status in
+              starting) sleep 1;;
+              healthy) break;;
+              *) echo "container is $status"; exit 1;;
+            esac
+          done
+          [ "$status" = healthy ]
+
+          # Every process runs as the requested uid, and every file the install wrote belongs to it.
+          users="$(docker exec test-nonroot-volume ps -o user= | sort -u)"
+          [ "$users" = 1000 ] || { echo "processes run as: $users"; exit 1; }
+          docker exec test-nonroot-volume test -e /var/www/wp-includes/version.php || { echo 'WordPress is not installed'; exit 1; }
+          foreign="$(docker exec test-nonroot-volume find /var/www -type f ! -user 1000)"
+          [ -z "$foreign" ] || { echo "not owned by uid 1000: $foreign"; exit 1; }
+
+          # The templates are rendered, the single-site configuration is in use, and WordPress runs.
+          docker exec test-nonroot-volume test -s /var/www/wp-config.php || { echo 'wp-config.php is missing'; exit 1; }
+          if docker exec test-nonroot-volume grep -F '$WP_' /var/www/wp-config.php /etc/nginx/server-default/single-site.conf; then
+            echo 'a template is not rendered'; exit 1
+          fi
+          [ "$(docker exec test-nonroot-volume ls /etc/nginx/server-default)" = single-site.conf ]
+          curl -s http://localhost:10001 | grep -q 'Error establishing a database connection'
+
+      # The project bind-mounted at /var/www, owned by the uid the container runs as: nothing the
+      # container writes there may belong to root or www-data (82).
+      - name: Test non-root mode with a bind mount
+        if: steps.changes.outputs.run == 'true'
+        timeout-minutes: 2
+        run: |
+          www="$RUNNER_TEMP/nonroot-www"
+          mkdir -p "$www"
+          # The runner user is not uid 1000; hand the mount to the uid the container runs as.
+          sudo chown 1000:1000 "$www"
+          trap 'status=$?; [ "$status" -eq 0 ] || docker logs test-nonroot-bind; docker rm -f test-nonroot-bind > /dev/null; exit "$status"' EXIT
+          docker run -d \
+            --name test-nonroot-bind \
+            --user 1000:1000 \
+            --group-add 0 \
+            -p 10002:80 \
+            -v "$www:/var/www" \
+            --health-cmd "/usr/local/bin/healthcheck.sh" \
+            --health-interval=30s \
+            --health-timeout=30s \
+            --health-start-period=60s \
+            --health-start-interval=1s \
+            php-fpm-nginx-wordpress:ci
+          while status="$(docker inspect -f '{{ .State.Health.Status }}' test-nonroot-bind)"; do
+            case $status in
+              starting) sleep 1;;
+              healthy) break;;
+              *) echo "container is $status"; exit 1;;
+            esac
+          done
+          [ "$status" = healthy ]
+
+          curl -s http://localhost:10002 | grep -q 'Error establishing a database connection'
+          [ -e "$www/wp-includes/version.php" ] || { echo 'WordPress is not installed'; exit 1; }
+          foreign="$(find "$www" ! -uid 1000)"
+          [ -z "$foreign" ] || { echo "not owned by uid 1000:"; find "$www" ! -uid 1000 -exec ls -lnd {} +; exit 1; }
+
+      # A WordPress in a subdirectory of /var/www uses the multisite-directory configuration.
+      # Docker creates a missing working directory as root with mode 755, so the subdirectory
+      # exists in the bind mount already, owned by the uid.
+      - name: Test non-root mode in a subdirectory
+        if: steps.changes.outputs.run == 'true'
+        timeout-minutes: 2
+        run: |
+          www="$RUNNER_TEMP/nonroot-subdir-www"
+          mkdir -p "$www/subdir"
+          sudo chown -R 1000:1000 "$www"
+          trap 'status=$?; [ "$status" -eq 0 ] || docker logs test-nonroot-subdir; docker rm -f test-nonroot-subdir > /dev/null; exit "$status"' EXIT
+          docker run -d \
+            --name test-nonroot-subdir \
+            --user 1000:1000 \
+            --group-add 0 \
+            -p 10003:80 \
+            -v "$www:/var/www" \
+            -w /var/www/subdir \
+            --health-cmd "/usr/local/bin/healthcheck.sh" \
+            --health-interval=30s \
+            --health-timeout=30s \
+            --health-start-period=60s \
+            --health-start-interval=1s \
+            php-fpm-nginx-wordpress:ci
+          while status="$(docker inspect -f '{{ .State.Health.Status }}' test-nonroot-subdir)"; do
+            case $status in
+              starting) sleep 1;;
+              healthy) break;;
+              *) echo "container is $status"; exit 1;;
+            esac
+          done
+          [ "$status" = healthy ]
+
+          [ "$(docker exec test-nonroot-subdir ls /etc/nginx/server-default)" = multisite-directory.conf ]
+          docker exec test-nonroot-subdir grep -qxF 'location /subdir {' /etc/nginx/server-default/multisite-directory.conf
+          curl -s http://localhost:10003/subdir/ | grep -q 'Error establishing a database connection'
+          [ -e "$www/subdir/wp-includes/version.php" ] || { echo 'WordPress is not installed in subdir'; exit 1; }
+          [ ! -e "$www/index.php" ] || { echo 'WordPress is installed in /var/www too'; exit 1; }
+          foreign="$(find "$www" ! -uid 1000)"
+          [ -z "$foreign" ] || { echo "not owned by uid 1000:"; find "$www" ! -uid 1000 -exec ls -lnd {} +; exit 1; }
+
       - name: Login to Docker Hub
         if: ${{ github.event_name != 'pull_request' }}
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
