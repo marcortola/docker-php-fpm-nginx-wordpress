@@ -26,7 +26,8 @@ if [ ! -e wp-config.php ]; then
 	echo "$template_dirs" | tr ' ' '\n' | while read -r path; do
 		find "$path" -type f -name "*$suffix" -print | while read -r template; do
 			file="${template%$suffix}"
-			rm -f "$file"
+			# Render in place: in non-root mode (see README.md) the uid can write the
+			# targets the Dockerfile prepares, but not delete files from their directories.
 			envsubst "$defined_envs" <"$template" >"$file"
 		done
 	done
