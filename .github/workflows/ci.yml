@@ -33,7 +33,7 @@ jobs:
       max-parallel: 4
       matrix:
         target: [ base, debug ]
-        php: [ 8.4, 8.5 ]
+        php: [ 8.5 ]
         wordpress: [ 7 ]
 
     steps:
