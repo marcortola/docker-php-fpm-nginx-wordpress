@@ -3,7 +3,7 @@ version: "3.8"
 services:
   
   app:
-    image: marcortola/php-fpm-nginx-wordpress:7.4
+    image: marcortola/php-fpm-nginx-wordpress:8.5
     ports:
       - '10000:80'
     volumes:
@@ -15,7 +15,7 @@ services:
       - WP_DB_HOST=localhost
   
   app_subdir:
-    image: marcortola/php-fpm-nginx-wordpress:7.4
+    image: marcortola/php-fpm-nginx-wordpress:8.5
     working_dir: /var/www/subdir
     ports:
       - '10001:80'
@@ -28,7 +28,7 @@ services:
       - WP_DB_HOST=localhost
             
   app_dev:
-    image: marcortola/php-fpm-nginx-wordpress:7.4-debug
+    image: marcortola/php-fpm-nginx-wordpress:8.5-debug
     ports:
       - '10002:80'
     volumes:
