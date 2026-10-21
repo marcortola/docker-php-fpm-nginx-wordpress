@@ -172,6 +172,16 @@ jobs:
         timeout-minutes: 2
         run: |
           trap 'status=$?; [ "$status" -eq 0 ] || docker logs test-nonroot-volume; docker rm -f test-nonroot-volume > /dev/null; docker volume rm test-nonroot-www > /dev/null; exit "$status"' EXIT
+          wait_healthy() {
+            while status="$(docker inspect -f '{{ .State.Health.Status }}' test-nonroot-volume)"; do
+              case $status in
+                starting) sleep 1;;
+                healthy) return 0;;
+                *) echo "container is $status"; return 1;;
+              esac
+            done
+            return 1
+          }
           docker volume create test-nonroot-www > /dev/null
           docker run -d \
             --name test-nonroot-volume \
@@ -185,14 +195,7 @@ jobs:
             --health-start-period=60s \
             --health-start-interval=1s \
             php-fpm-nginx-wordpress:ci
-          while status="$(docker inspect -f '{{ .State.Health.Status }}' test-nonroot-volume)"; do
-            case $status in
-              starting) sleep 1;;
-              healthy) break;;
-              *) echo "container is $status"; exit 1;;
-            esac
-          done
-          [ "$status" = healthy ]
+          wait_healthy
 
           # Every process runs as the requested uid, and every file the install wrote belongs to it.
           users="$(docker exec test-nonroot-volume ps -o user= | sort -u)"
@@ -201,11 +204,18 @@ jobs:
           foreign="$(docker exec test-nonroot-volume find /var/www -type f ! -user 1000)"
           [ -z "$foreign" ] || { echo "not owned by uid 1000: $foreign"; exit 1; }
 
-          # The templates are rendered, the single-site configuration is in use, and WordPress runs.
+          # wp-config.php is rendered, the single-site configuration is in use, and WordPress runs.
           docker exec test-nonroot-volume test -s /var/www/wp-config.php || { echo 'wp-config.php is missing'; exit 1; }
-          if docker exec test-nonroot-volume grep -F '$WP_' /var/www/wp-config.php /etc/nginx/server-default/single-site.conf; then
-            echo 'a template is not rendered'; exit 1
+          if docker exec test-nonroot-volume grep -F '$WP_' /var/www/wp-config.php; then
+            echo 'wp-config.php is not rendered'; exit 1
           fi
+          [ "$(docker exec test-nonroot-volume ls /etc/nginx/server-default)" = single-site.conf ]
+          docker exec test-nonroot-volume grep -qxF 'location / {' /etc/nginx/server-default/single-site.conf
+          curl -s http://localhost:10001 | grep -q 'Error establishing a database connection'
+
+          # A second start finds WordPress installed and serves it again.
+          docker restart test-nonroot-volume > /dev/null
+          wait_healthy
           [ "$(docker exec test-nonroot-volume ls /etc/nginx/server-default)" = single-site.conf ]
           curl -s http://localhost:10001 | grep -q 'Error establishing a database connection'
 
@@ -257,6 +267,16 @@ jobs:
           mkdir -p "$www/subdir"
           sudo chown -R 1000:1000 "$www"
           trap 'status=$?; [ "$status" -eq 0 ] || docker logs test-nonroot-subdir; docker rm -f test-nonroot-subdir > /dev/null; exit "$status"' EXIT
+          wait_healthy() {
+            while status="$(docker inspect -f '{{ .State.Health.Status }}' test-nonroot-subdir)"; do
+              case $status in
+                starting) sleep 1;;
+                healthy) return 0;;
+                *) echo "container is $status"; return 1;;
+              esac
+            done
+            return 1
+          }
           docker run -d \
             --name test-nonroot-subdir \
             --user 1000:1000 \
@@ -270,14 +290,7 @@ jobs:
             --health-start-period=60s \
             --health-start-interval=1s \
             php-fpm-nginx-wordpress:ci
-          while status="$(docker inspect -f '{{ .State.Health.Status }}' test-nonroot-subdir)"; do
-            case $status in
-              starting) sleep 1;;
-              healthy) break;;
-              *) echo "container is $status"; exit 1;;
-            esac
-          done
-          [ "$status" = healthy ]
+          wait_healthy
 
           [ "$(docker exec test-nonroot-subdir ls /etc/nginx/server-default)" = multisite-directory.conf ]
           docker exec test-nonroot-subdir grep -qxF 'location /subdir {' /etc/nginx/server-default/multisite-directory.conf
@@ -286,6 +299,51 @@ jobs:
           [ ! -e "$www/index.php" ] || { echo 'WordPress is installed in /var/www too'; exit 1; }
           foreign="$(find "$www" ! -uid 1000)"
           [ -z "$foreign" ] || { echo "not owned by uid 1000:"; find "$www" ! -uid 1000 -exec ls -lnd {} +; exit 1; }
+
+          # A second start finds wp-config.php in the subdirectory and still renders the
+          # subdirectory into the nginx configuration.
+          docker restart test-nonroot-subdir > /dev/null
+          wait_healthy
+          docker exec test-nonroot-subdir grep -qxF 'location /subdir {' /etc/nginx/server-default/multisite-directory.conf
+          curl -s http://localhost:10003/subdir/ | grep -q 'Error establishing a database connection'
+
+      # The same in root mode, where Docker creates the working directory inside the container.
+      - name: Test root mode in a subdirectory
+        if: steps.changes.outputs.run == 'true'
+        timeout-minutes: 2
+        run: |
+          trap 'status=$?; [ "$status" -eq 0 ] || docker logs test-root-subdir; docker rm -f test-root-subdir > /dev/null; exit "$status"' EXIT
+          wait_healthy() {
+            while status="$(docker inspect -f '{{ .State.Health.Status }}' test-root-subdir)"; do
+              case $status in
+                starting) sleep 1;;
+                healthy) return 0;;
+                *) echo "container is $status"; return 1;;
+              esac
+            done
+            return 1
+          }
+          docker run -d \
+            --name test-root-subdir \
+            -p 10004:80 \
+            -w /var/www/subdir \
+            --health-cmd "/usr/local/bin/healthcheck.sh" \
+            --health-interval=30s \
+            --health-timeout=30s \
+            --health-start-period=60s \
+            --health-start-interval=1s \
+            php-fpm-nginx-wordpress:ci
+          wait_healthy
+          [ "$(docker exec test-root-subdir ls /etc/nginx/server-default)" = multisite-directory.conf ]
+          docker exec test-root-subdir grep -qxF 'location /subdir {' /etc/nginx/server-default/multisite-directory.conf
+          curl -s http://localhost:10004/subdir/ | grep -q 'Error establishing a database connection'
+
+          # A second start finds wp-config.php in the subdirectory and still renders the
+          # subdirectory into the nginx configuration.
+          docker restart test-root-subdir > /dev/null
+          wait_healthy
+          docker exec test-root-subdir grep -qxF 'location /subdir {' /etc/nginx/server-default/multisite-directory.conf
+          curl -s http://localhost:10004/subdir/ | grep -q 'Error establishing a database connection'
 
       - name: Login to Docker Hub
         if: ${{ github.event_name != 'pull_request' }}
