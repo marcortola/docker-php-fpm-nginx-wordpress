@@ -33,16 +33,16 @@ README explains `HOST_UID`, `HOME` and where the mode works.
 
 ### What changes
 
-Everything the base image changes applies. On top of that, when the uid is not 0:
+Everything the base image changes applies. On top of that, when the uid is not 0,
+`docker-entrypoint.d/60-install-wordpress.sh` installs WordPress owned by your uid: it does not
+set the archive owner to `www-data`, does not chown `wp-content`, and keeps files and directories
+that already exist in the working directory instead of overwriting them, since it cannot change
+the mode of directories it does not own.
 
-- `docker-entrypoint.d/50-auto-envsubst.sh` renders `wp-config.php` and the nginx site
-  configuration in place, into files and directories the image prepares for group 0;
-- `docker-entrypoint.d/60-install-wordpress.sh` installs WordPress owned by your uid: it does not
-  set the archive owner to `www-data`, does not chown `wp-content`, and keeps files and
-  directories that already exist in the working directory instead of overwriting them, since it
-  cannot change the mode of directories it does not own.
-
-Root mode installs and renders as before.
+In both modes `docker-entrypoint.d/50-auto-envsubst.sh` renders in place: it overwrites the nginx
+site configuration files the image prepares and writes `wp-config.php` into `/usr/src/wordpress`,
+a directory group 0 can write, rather than deleting and recreating files. Root mode installs and
+renders as before.
 
 These paths have group 0 with group permissions equal to the owner's, so group 0 can write them.
 This image makes nothing world-writable beyond what it did before (`/var/www/wp-content` and
@@ -53,6 +53,14 @@ This image makes nothing world-writable beyond what it did before (`/var/www/wp-
 - `/etc/nginx/server-default`, which receives one of them;
 - `/usr/src/wordpress`, where `wp-config.php` is rendered before the install copies it;
 - `/var/www`, where WordPress is installed.
+
+A derived image must keep them so. Its `COPY ./rootfs /` whose tree contains
+`etc/nginx/server-default/`, `usr/src/wordpress/` or `var/www/` resets those directories to
+`root:root` with the mode from your checkout, which your uid cannot write. Re-apply the group
+after the copy, for example
+`RUN chgrp 0 /etc/nginx/server-default /var/www && chmod g=u /etc/nginx/server-default /var/www`.
+The [base image's README](https://github.com/marcortola/docker-php-fpm-nginx#derived-images) covers
+copying a file onto a render target.
 
 ### Working directory and volumes
 
