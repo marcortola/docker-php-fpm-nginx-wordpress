@@ -1,5 +1,5 @@
-ARG PHP_VERSION=7.4
-ARG WP_VERSION=6.1
+ARG PHP_VERSION=8.5
+ARG WP_VERSION=7
 
 ### BASE ###
 FROM wordpress:${WP_VERSION}-fpm-alpine as wordpress
