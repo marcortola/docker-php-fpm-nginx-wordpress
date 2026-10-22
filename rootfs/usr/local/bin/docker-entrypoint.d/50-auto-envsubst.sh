@@ -16,21 +16,25 @@ if echo "$PWD" | grep -q "^/var/www/[^/]\+/\?$"; then
     export WP_SUBDIR="${PWD##*/}"
 fi
 
-template_dirs="/usr/src/wordpress /etc/nginx/wordpress"
+# The nginx configuration is rendered on every start: the base image's 20-auto-envsubst.sh renders
+# it first without the WP_ variables, which leaves $WP_SUBDIR in it. wp-config.php is rendered
+# only for a working directory that has none yet.
+template_dirs="/etc/nginx/wordpress"
+[ -e wp-config.php ] || template_dirs="/usr/src/wordpress $template_dirs"
 suffix=".auto-tpl"
 filter="(WP_)"
 
-if [ ! -e wp-config.php ]; then
-	defined_envs=$(printf '${%s} ' $(awk "END { for (name in ENVIRON) { print ( name ~ /${filter}/ ) ? name : \"\" } }" </dev/null))
+defined_envs=$(printf '${%s} ' $(awk "END { for (name in ENVIRON) { print ( name ~ /${filter}/ ) ? name : \"\" } }" </dev/null))
 
-	echo "$template_dirs" | tr ' ' '\n' | while read -r path; do
-		find "$path" -type f -name "*$suffix" -print | while read -r template; do
-			file="${template%$suffix}"
-			rm -f "$file"
-			envsubst "$defined_envs" <"$template" >"$file"
-		done
+echo "$template_dirs" | tr ' ' '\n' | while read -r path; do
+	find "$path" -type f -name "*$suffix" -print | while read -r template; do
+		file="${template%$suffix}"
+		# Render in place, in both modes: in non-root mode (see README.md) the uid can write the
+		# nginx render targets the Dockerfile prepares but not delete them, and it creates
+		# wp-config.php in /usr/src/wordpress, a directory the Dockerfile makes writable.
+		envsubst "$defined_envs" <"$template" >"$file"
 	done
-fi
+done
 
 mkdir -p /etc/nginx/server-default
 
