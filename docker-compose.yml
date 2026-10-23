@@ -1,8 +1,4 @@
-# Host ports are generic knobs, so several stacks can run side by side (one per
-# git worktree, say): HOST_PORT_APP_80 (default 10000), HOST_PORT_APP_SUBDIR_80
-# (10001) and HOST_PORT_APP_DEV_80 (10002). Unset or empty, each keeps its default.
-# The project is named after the checkout directory; pass -p or COMPOSE_PROJECT_NAME
-# for another stack beside one of the same name.
+# Host ports: see "Example stack" in README.md.
 version: "3.8"
 
 services:
