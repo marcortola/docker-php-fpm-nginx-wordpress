@@ -73,3 +73,19 @@ starts root-owned for the same reason; keep `wp-content` in the bind mount inste
 A new named volume at `/var/www` or `/var/www/wp-content` copies the image's directory, which
 your uid can write. One created in root mode keeps its `www-data` files; hand them over once as
 the base image's README describes, or remove the volume so Docker recreates it.
+
+## Example stack
+
+`docker-compose.yml` runs the three variants: `app` (port 10000), `app_subdir` (10001, served at
+`/subdir/`) and `app_dev` (10002). With no database they answer with WordPress's "Error
+establishing a database connection" page. The host ports are generic knobs, so several copies of
+the stack can run side by side, one per git worktree for example: `HOST_PORT_APP_80`,
+`HOST_PORT_APP_SUBDIR_80` and `HOST_PORT_APP_DEV_80`. Unset or empty, each keeps its default. The
+project is named after the checkout's directory; for another stack beside one of the same name,
+pass `-p <name>` or export `COMPOSE_PROJECT_NAME`.
+
+```sh
+HOST_PORT_APP_80=31201 HOST_PORT_APP_SUBDIR_80=31202 HOST_PORT_APP_DEV_80=31203 \
+  docker compose -p wp-second up -d
+docker compose -p wp-second down -v
+```
