@@ -1,3 +1,8 @@
+# Host ports are generic knobs, so several stacks can run side by side (one per
+# git worktree, say): HOST_PORT_APP_80 (default 10000), HOST_PORT_APP_SUBDIR_80
+# (10001) and HOST_PORT_APP_DEV_80 (10002). Unset or empty, each keeps its default.
+# The project is named after the checkout directory; pass -p or COMPOSE_PROJECT_NAME
+# for another stack beside one of the same name.
 version: "3.8"
 
 services:
@@ -5,7 +10,7 @@ services:
   app:
     image: marcortola/php-fpm-nginx-wordpress:8.5
     ports:
-      - '10000:80'
+      - '${HOST_PORT_APP_80:-10000}:80'
     volumes:
       - wp_content:/var/www/wp-content
     environment:
@@ -18,7 +23,7 @@ services:
     image: marcortola/php-fpm-nginx-wordpress:8.5
     working_dir: /var/www/subdir
     ports:
-      - '10001:80'
+      - '${HOST_PORT_APP_SUBDIR_80:-10001}:80'
     volumes:
       - wp_content:/var/www/subdir/wp-content
     environment:
@@ -30,7 +35,7 @@ services:
   app_dev:
     image: marcortola/php-fpm-nginx-wordpress:8.5-debug
     ports:
-      - '10002:80'
+      - '${HOST_PORT_APP_DEV_80:-10002}:80'
     volumes:
       - wp_content:/var/www/wp-content
     environment:
